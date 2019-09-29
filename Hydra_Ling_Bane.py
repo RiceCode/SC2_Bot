@@ -28,7 +28,7 @@ from sc2.units import Units
 
 
 
-class Bot4(sc2.BotAI):
+class Hydra_Ling_Bane(sc2.BotAI):
     def select_target(self):
         if self.enemy_units.exists:
             return random.choice(self.enemy_units).position
@@ -279,7 +279,7 @@ class Bot4(sc2.BotAI):
 def main():
     sc2.run_game(
         sc2.maps.get("AcropolisLE"),
-        [Bot(Race.Zerg, Bot4()), Computer(Race.Terran, Difficulty.Harder)],
+        [Bot(Race.Zerg, Hydra_Ling_Bane()), Computer(Race.Terran, Difficulty.Harder)],
         realtime=False,
         save_replay_as="ZvT.SC2Replay",
     )
