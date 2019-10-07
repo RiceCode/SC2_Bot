@@ -11,6 +11,7 @@ from sc2.constants import *
 from sc2.player import Bot, Computer
 from sc2.unit import Unit
 from sc2.units import Units
+from random import randrange
 
 
 
@@ -23,17 +24,50 @@ from sc2.units import Units
 ################
 
 
+class Emptybot(sc2.BotAI):
+    async def on_step(self, iteration):
+        if iteration == 0:
+            await self.chat_send("(glhf)")
+
+
+
 
 
 
 
 
 class Hydra_Ling_Bane(sc2.BotAI):
+
+
+    def __init__(self):
+        self.defend_around = [HATCHERY, LAIR, HIVE, EXTRACTOR, DRONE]
+        self.attacking = 0
+
+        self.units_to_ignore_defend = [
+            UnitTypeId.KD8CHARGE,
+            UnitTypeId.REAPER,
+            UnitTypeId.BANELING,
+            UnitTypeId.EGG,
+            UnitTypeId.LARVA,
+            UnitTypeId.BROODLING,
+            UnitTypeId.INTERCEPTOR,
+            UnitTypeId.CREEPTUMOR,
+            UnitTypeId.CREEPTUMORBURROWED,
+            UnitTypeId.CREEPTUMORQUEEN,
+            UnitTypeId.CREEPTUMORMISSILE
+        ]
+
+
+
     def select_target(self):
         if self.enemy_units.exists:
             return random.choice(self.enemy_units).position
         if self.enemy_structures.exists:
             return random.choice(self.enemy_structures).position
+
+
+
+
 
     def finish_them(self):
         if self.enemy_units.exists:
@@ -86,7 +120,7 @@ class Hydra_Ling_Bane(sc2.BotAI):
         if iteration == 0:
             await self.chat_send("(glhf)")
 
-        await self.distribute_workers()
+        await self.distribute_workers() #todo: cannot find this function. rewrite?
         await self.expand(numBase)
         await self.base_management()
         await self.overlord_management()
@@ -121,20 +155,84 @@ class Hydra_Ling_Bane(sc2.BotAI):
     #Defend looks into a list of known enemy. When there are known enemy, we defend
         defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
         forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING)
-        attacking = 0
 
-        if defense_forces.amount > 15: #and iteration % 50 == 0:
+        #Defend your base with 15+ defense force
+        threats = []
+
+        #print(self.enemy_units)
+
+        for structure_type in self.defend_around:
+            #print("1) Hello, defend around", self.defend_around; "Structure type:" structure_type)
+
+            #this loop wasn't entered.
+            for structure in self.structures(structure_type):
+                #print("3) structure:", structure, "structure_type", self.structures(structure_type))
+
+                if len(self.enemy_units) > 0:
+                    #print("6) Enemy units: ", self.enemy_units )
+                    #self.enemy_units returns: [Unit(name='Drone', tag=4350017537), Unit(name='Drone', tag=4351852545), Unit(name='Drone', tag=4350279681), Unit(name='Drone', tag=4351328257)]
+
+                    #all others
+                    #iterate over a list of enemy
+                    for enemy in self.enemy_units:
+                        #print("6.1) For loop this enemy:", enemy, "type_id:", enemy.type_id)
+                        #6.1) For loop this enemy: Unit(name='Drone', tag=4349755393) type_id: UnitTypeId.DRONE
+                        if enemy.type_id not in self.units_to_ignore_defend:
+                            #print("6.2) If not units_to ignore", enemy)
+                            #6.2) If not units_to ignore Unit(name='Drone', tag=4349755393)
+                            #  threats += enemy #does this need to be typeid??
+                            threats.append(enemy)
+                            #print("6.3) Current threat:", threats)
+
+                #print("7) current threats numbers", len(threats), ":", threats)
+                #keep running this loop until we have a threat.
+                if threats:
+                    break
+            if threats:
+                break
+
+
+
+
+        #print("current attack value ", self.attacking, "; Forces amount:", forces.amount, "threats", len(threats))
+
+
+
+        #for now lets set it to if have 1 defense force, defend. Future we set based on maybe number of units... waiting is too damn painful
+        if defense_forces.amount > len(threats) and len(threats) >= 1:
+            print("Attempting to defend")
+            defence_target = threats[0].position.random_on_distance(random.randrange(1, 3))
             for unit in defense_forces.idle:
-                self.do(unit.attack(self.select_target()))
+                self.do(unit.attack(defence_target))
+
+            """
+            for unit in defense_forces.idle:
+                unit.attack(
+                    self.structures(HATCHERY)
+                        .closest_to(self.game_info.map_center)
+                        .position.towards(self.game_info.map_center, random.randrange(8, 10))
+                )
+            """
+
+
+
+
+
+
         if forces.amount > 120:
+            print("Prepare for an attack")
             for unit in forces.idle:
                 self.do(unit.attack(self.finish_them()))
-                attacking = 1
+                self.attacking = 1
+
+
         #if we are attacking and our units fall below 80, we retreat
-        if attacking == 1 and forces.amount <= 80:
+        if self.attacking == 1 and forces.amount <= 80:
+            print("Planning for a retreat")
             for unit in forces:
-                self.do(unit.move(self.townhalls.position))
-            attacking = 0
+                self.do(unit.move(self.structures(HATCHERY).closest_to(self.game_info.map_center).position.towards(self.game_info.map_center, randrange(8,10))))
+            self.attacking = 0
+
 
 
 
@@ -268,19 +366,31 @@ class Hydra_Ling_Bane(sc2.BotAI):
     async def infestation_pit(self):
         if self.structures(LAIR).ready.exists  and not (self.structures(INFESTATIONPIT).exists or self.already_pending(INFESTATIONPIT)):
             if self.can_afford(INFESTATIONPIT):
-                await self.build(INFESTATIONPIT, near=self.townhalls.first)
+                await self.build(INFESTATIONPIT, near=self.townhalls.first.position.towards(self.game_info.map_center,5))
 
 
 
 
 
 
-
+""" #use this for playing main bot.
 def main():
     sc2.run_game(
-        sc2.maps.get("AcropolisLE"),
-        [Bot(Race.Zerg, Hydra_Ling_Bane()), Computer(Race.Terran, Difficulty.Harder)],
-        realtime=False,
+        sc2.maps.get("AcropolisLE"), [
+        Bot(Race.Zerg, Hydra_Ling_Bane()), '
+        Computer(Race.Terran, Difficulty.Harder)
+        ], realtime=False,
+        save_replay_as="ZvT.SC2Replay",
+    )
+"""
+
+#use this if playing against main bot
+def main():
+    sc2.run_game(
+        sc2.maps.get("AcropolisLE"), [
+        Bot(Race.Zerg, Emptybot()),
+        Bot(Race.Zerg, Hydra_Ling_Bane())
+        ], realtime=True,
         save_replay_as="ZvT.SC2Replay",
     )
 
