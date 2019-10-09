@@ -120,7 +120,7 @@ class Hydra_Ling_Bane(sc2.BotAI):
         if iteration == 0:
             await self.chat_send("(glhf)")
 
-        await self.distribute_workers() #todo: cannot find this function. rewrite?
+        await self.distribute_workers() # in sc2/bot_ai.py
         await self.expand(numBase)
         await self.base_management()
         await self.overlord_management()
@@ -154,10 +154,12 @@ class Hydra_Ling_Bane(sc2.BotAI):
     async def defend(self, iteration):
     #Defend looks into a list of known enemy. When there are known enemy, we defend
         defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
+        defense_forces_antiair = self.units(HYDRALISK) | self.units(QUEEN)
         forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING)
 
         #Defend your base with 15+ defense force
         threats = []
+        threats_air = []
 
         #print(self.enemy_units)
 
@@ -177,24 +179,40 @@ class Hydra_Ling_Bane(sc2.BotAI):
                     for enemy in self.enemy_units:
                         #print("6.1) For loop this enemy:", enemy, "type_id:", enemy.type_id)
                         #6.1) For loop this enemy: Unit(name='Drone', tag=4349755393) type_id: UnitTypeId.DRONE
-                        if enemy.type_id not in self.units_to_ignore_defend:
+                        if enemy.type_id not in self.units_to_ignore_defend and not enemy.is_flying:
                             #print("6.2) If not units_to ignore", enemy)
                             #6.2) If not units_to ignore Unit(name='Drone', tag=4349755393)
                             #  threats += enemy #does this need to be typeid??
                             threats.append(enemy)
                             #print("6.3) Current threat:", threats)
+                        if enemy.type_id not in self.units_to_ignore_defend and enemy.is_flying:
+                            threats_air.append(enemy)
 
                 #print("7) current threats numbers", len(threats), ":", threats)
                 #keep running this loop until we have a threat.
-                if threats:
+                if len(threats) + len(threats_air) > 1:
                     break
-            if threats:
+            if len(threats) + len(threats_air) > 1:
                 break
 
 
 
 
+
+
+
+                #units.can_attack_air
+                #units.can_attack_ground
+                #units.is_flying
+
+
         #print("current attack value ", self.attacking, "; Forces amount:", forces.amount, "threats", len(threats))
+        if defense_forces_antiair.amount > len(threats_air) and len(threats_air) >= 1:
+            print("Attempting to defend")
+            defence_target_air = threats_air[0].position.random_on_distance(random.randrange(1, 3))
+
+            for unit in defense_forces_antiair.idle:
+                 self.do(unit.attack(defence_target_air))
 
 
 
@@ -202,18 +220,14 @@ class Hydra_Ling_Bane(sc2.BotAI):
         if defense_forces.amount > len(threats) and len(threats) >= 1:
             print("Attempting to defend")
             defence_target = threats[0].position.random_on_distance(random.randrange(1, 3))
+
             for unit in defense_forces.idle:
                 self.do(unit.attack(defence_target))
 
-            """
-            for unit in defense_forces.idle:
-                unit.attack(
-                    self.structures(HATCHERY)
-                        .closest_to(self.game_info.map_center)
-                        .position.towards(self.game_info.map_center, random.randrange(8, 10))
-                )
-            """
 
+
+        #in_ability_cast_range
+        #energy_percentage
 
 
 
