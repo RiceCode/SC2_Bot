@@ -1,3 +1,4 @@
+"""
 import sc2
 from sc2 import Race, Difficulty
 from sc2.constants import *
@@ -33,3 +34,16 @@ enemy_list = [
 for enemy in enemy_list:
     if enemy not in units_to_ignore_defend:
         print(enemy)
+"""
+
+list = ["Unit(name='Overlord', tag=4355522561)", "Unit(name='Overlord', tag=4352114690)"]
+current = "Unit(name='Overlord', tag=4355522561)"
+list = ["Unit(name='Overlord', tag=4352114690)"]
+
+if current not in list:
+    print("no")
+else:
+    print("yes")
+
+
+

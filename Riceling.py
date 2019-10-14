@@ -36,12 +36,47 @@ class Emptybot(sc2.BotAI):
 
 
 
-class Hydra_Ling_Bane(sc2.BotAI):
+class Riceling(sc2.BotAI):
 
 
     def __init__(self):
+
+        self.overlord_list = []              #set up the list -> but put outside it won't recognize..; put inside -> second iteration will clear everything.
+        self.overlord_timer = 0        #in seconds, we determine when to send our overlord to scout
         self.defend_around = [HATCHERY, LAIR, HIVE, EXTRACTOR, DRONE]
         self.attacking = 0
+
+        #ideal units
+        self.ideal_mutalisk = 0
+        self.ideal_corrupter = 0
+
+        #action
+        self.action_scouting = 0
+
+
+        #buildorder
+        self.buildorder = [
+            UnitTypeId.DRONE,       #first set
+            UnitTypeId.OVERLORD,
+            UnitTypeId.DRONE,
+            UnitTypeId.DRONE,       #second set
+            UnitTypeId.DRONE,
+            UnitTypeId.DRONE,
+            UnitTypeId.HATCHERY,
+            UnitTypeId.DRONE,       #third set
+            UnitTypeId.DRONE,
+            UnitTypeId.EXTRACTOR,
+            UnitTypeId.SPAWNINGPOOL,
+            UnitTypeId.DRONE,       #forth set
+            UnitTypeId.DRONE,
+            UnitTypeId.DRONE,
+            UnitTypeId.DRONE,
+            "END",
+        ]
+        # current step of the buildorder;
+        self.buildorder_step = 0
+        self.from_larva = {UnitTypeId.DRONE, UnitTypeId.OVERLORD, UnitTypeId.ZERGLING, UnitTypeId.ROACH}
+        self.from_drone = {UnitTypeId.SPAWNINGPOOL, UnitTypeId.EXTRACTOR, UnitTypeId.ROACHWARREN}
 
         self.units_to_ignore_defend = [
             UnitTypeId.KD8CHARGE,
@@ -94,6 +129,10 @@ class Hydra_Ling_Bane(sc2.BotAI):
             return "late"
 
 
+    def train_overlord(self):
+        if self.can_afford(OVERLORD) and self.units(LARVA).exists and not self.already_pending(OVERLORD):
+            self.do(self.units(LARVA).random.train(OVERLORD))
+
 
     def train_baneling(self):
         if self.structures(BANELINGNEST).ready.exists:
@@ -115,23 +154,29 @@ class Hydra_Ling_Bane(sc2.BotAI):
 
 
     async def on_step(self, iteration):
-
         numBase = 2
         if iteration == 0:
             await self.chat_send("(glhf)")
 
+
         await self.distribute_workers() # in sc2/bot_ai.py
-        await self.expand(numBase)
-        await self.base_management()
-        await self.overlord_management()
-        await self.drone_management(numBase)
-        await self.extractor_build()
-        await self.build_baneling()
-        await self.defend(iteration)
-        await self.queen(numBase)
-        await self.build_hydralisk()
-        await self.infestation_pit()
-        await self.force()
+        await self.do_buildorder()
+
+        if self.buildorder[self.buildorder_step] == "END":
+            await self.distribute_workers() # in sc2/bot_ai.py
+            await self.expand(numBase)
+            await self.base_management()
+            await self.overlord_management()
+            await self.drone_management(numBase)
+            await self.extractor_build()
+            await self.build_baneling()
+            await self.defend(iteration)
+            await self.queen(numBase)
+            await self.build_hydralisk()
+            await self.infestation_pit()
+            await self.force()
+
+
 
 
 
@@ -198,7 +243,10 @@ class Hydra_Ling_Bane(sc2.BotAI):
 
 
 
+                #it seems like whatever is scouted gets added to the list???
+                #Attempting to defend ground -> which says everything has been added to the threats regardless of how far away it is.
 
+                #need to check overlord list and see why we send all 3 of them.
 
 
                 #units.can_attack_air
@@ -208,7 +256,7 @@ class Hydra_Ling_Bane(sc2.BotAI):
 
         #print("current attack value ", self.attacking, "; Forces amount:", forces.amount, "threats", len(threats))
         if defense_forces_antiair.amount > len(threats_air) and len(threats_air) >= 1:
-            print("Attempting to defend")
+            print("Attempting to defend Air")
             defence_target_air = threats_air[0].position.random_on_distance(random.randrange(1, 3))
 
             for unit in defense_forces_antiair.idle:
@@ -218,7 +266,7 @@ class Hydra_Ling_Bane(sc2.BotAI):
 
         #for now lets set it to if have 1 defense force, defend. Future we set based on maybe number of units... waiting is too damn painful
         if defense_forces.amount > len(threats) and len(threats) >= 1:
-            print("Attempting to defend")
+            #print("Attempting to defend ground")
             defence_target = threats[0].position.random_on_distance(random.randrange(1, 3))
 
             for unit in defense_forces.idle:
@@ -249,6 +297,67 @@ class Hydra_Ling_Bane(sc2.BotAI):
 
 
 
+
+    #do_buildorder modified from RoachRush.py https://github.com/tweakimp/RoachRush/blob/master/Main.py
+    async def do_buildorder(self):
+        # only try to build something if you have 25 minerals, otherwise you dont have enough anyway
+        if self.minerals < 25:
+            return
+        current_step = self.buildorder[self.buildorder_step]
+        # do nothing if we are done already or dont have enough resources for current step of build order
+        if current_step == "END" or not self.can_afford(current_step):
+            return
+        if current_step == UnitTypeId.HATCHERY:
+            await self.expand(2)
+            self.buildorder_step += 1
+
+
+
+        # check if current step needs larva
+        if current_step in self.from_larva and self.larva:
+            self.do(self.larva.first.train(current_step))
+            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name} ")
+            self.buildorder_step += 1
+
+
+
+        # check if current step needs drone
+        elif current_step in self.from_drone:
+            if current_step == UnitTypeId.EXTRACTOR:
+                # get geysers that dont have extractor on them
+                geysers = self.vespene_geyser.filter(
+                    lambda g: all(g.position != e.position for e in self.units(UnitTypeId.EXTRACTOR))
+                )
+                # pick closest
+                position = geysers.closest_to(self.start_location)
+            else:
+                if current_step == UnitTypeId.ROACHWARREN:
+                    # check tech requirement
+                    if not self.structures(UnitTypeId.SPAWNINGPOOL).ready:
+                        return
+                # pick position towards ramp to avoid building between hatchery and resources
+                buildings_around = self.townhalls(UnitTypeId.HATCHERY).first.position.towards(
+                    self.main_base_ramp.depot_in_middle, 7
+                )
+                # look for position until we find one that is not already used
+                position = None
+                while not position:
+                    position = await self.find_placement(building=current_step, near=buildings_around, placement_step=4)
+                    if any(building.position == position for building in self.units.structure):
+                        position = None
+            # got building position, pick worker that will get there the fastest
+            worker = self.workers.closest_to(position)
+            self.do(worker.build(current_step, position))
+            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
+            self.buildorder_step += 1
+        elif current_step == UnitTypeId.QUEEN:
+            # tech requirement check
+            if not self.structures(UnitTypeId.SPAWNINGPOOL).ready:
+                return
+            hatch = self.townhalls(UnitTypeId.HATCHERY).first
+            self.do(hatch.train(UnitTypeId.QUEEN))
+            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
+            self.buildorder_step += 1
 
 
     async def build_hydralisk(self):
@@ -299,31 +408,84 @@ class Hydra_Ling_Bane(sc2.BotAI):
             #print("Current drone amount ", self.units(DRONE).amount)
             self.do(self.units(LARVA).random.train(DRONE))
 
+        #drones that are idle
+        for drone in self.units(DRONE).idle:
+            #print("attempting to redistribute idle worker")
+            await self.distribute_workers()
+
+
     #Only allow 3 expansion max
     async def expand(self, numBase):
+        #3 base start
         if (self.structures(HATCHERY).amount + self.structures(LAIR).amount + self.structures(HIVE).amount )  <= numBase :
             if self.can_afford(HATCHERY) and  not self.already_pending(HATCHERY):
                 await self.expand_now()
 
+        #continue expansion if have extra resources
+        if (self.townhalls.amount) >= 3:
+            if self.minerals > 2500:
+                if self.can_afford(HATCHERY) and  not self.already_pending(HATCHERY):
+                    await self.expand_now()
+
+
+
+
+
     async def overlord_management(self):
         """
-            Creates overlords whenever we're reaching towards population cpa.
+            Creates overlords whenever we're reaching towards population cap.
             Assume the timing of the base determines what stage of the game we're at.
+
+            We also manage scouting with overlord. Currently sending one to the main base of enemy. Send new one every 80 secs when previous one dies.
+            todo: scout multiple base; scouting route.
         """
 
         #Early game
         if self.supply_left < 2 and self.game_stage() == "early":
-            if self.can_afford(OVERLORD) and self.units(LARVA).exists and not self.already_pending(OVERLORD):
-                self.do(self.units(LARVA).random.train(OVERLORD))
+            self.train_overlord()
         #Mid game
-
         if self.supply_left < 6 and self.game_stage() == "mid":
-            if self.can_afford(OVERLORD) and self.units(LARVA).exists and not self.already_pending(OVERLORD):
-                self.do(self.units(LARVA).random.train(OVERLORD))
+            self.train_overlord()
         #Late game
         if self.supply_left < 12 and self.game_stage() == "late":
-            if self.can_afford(OVERLORD) and self.units(LARVA).exists and not self.already_pending(OVERLORD):
-                self.do(self.units(LARVA).random.train(OVERLORD))
+            self.train_overlord()
+
+
+        #if there's second townhall
+        if len(self.townhalls) > 1:
+            th = self.townhalls[1]
+            abilities = await self.get_available_abilities(th)
+            if AbilityId.RESEARCH_PNEUMATIZEDCARAPACE in abilities and self.can_afford(AbilityId.RESEARCH_PNEUMATIZEDCARAPACE):
+                self.do(th(AbilityId.RESEARCH_PNEUMATIZEDCARAPACE))
+                print("started research")
+
+
+        #First start by sending our first overlord directly into the enemy's base. Must be not scouting (action_scouting = 0) and wasn't scouting in the last 80 seconds (as defined by overlord_timer)
+        if self.action_scouting == 0 and self.time >= self.overlord_timer:
+            self.action_scouting = 1
+            print("Sending overlord at ", self.time_formatted)
+            #assign all overlord to the list
+            for overlord in self.units(OVERLORD).idle:
+                self.overlord_list.append(overlord)
+                break
+
+            print("First overlord in list", self.overlord_list[0])               #returns the first overlord's [name, tag]
+            self.do(self.overlord_list[0].move(self.enemy_start_locations[0]))   #successfully moved the overlord
+
+
+        #When our overlord dies, we reset everything
+        if len(self.overlord_list) >= 1:
+            if self.overlord_list[0] not in self.units(OVERLORD):
+                print("Scouting Overlord is dead, resetting scouting")
+                #reset everything
+                self.action_scouting = 0
+                self.overlord_list.clear()  #reset the list
+                self.overlord_timer = self.time + 80                        #time is in seconds. We're going to send next overlord in 80 seconds.
+                print("Next overlord scout = ", self.overlord_timer, "which is:", self.overlord_timer/60, "min")
+                self.train_overlord()                                         #overlord is going to die, so train a new one.
+
+
+
 
 
 
@@ -359,10 +521,6 @@ class Hydra_Ling_Bane(sc2.BotAI):
             if AbilityId.RESEARCH_ZERGLINGADRENALGLANDS in abilities and self.can_afford(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS):
                 self.do(pool(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS))
 
-
-
-
-
         #upgrade townhall
         if self.structures(SPAWNINGPOOL).ready.exists:
             if not (self.townhalls(LAIR).exists or self.already_pending(LAIR)) and hq.is_idle:
@@ -374,6 +532,7 @@ class Hydra_Ling_Bane(sc2.BotAI):
             if not (self.townhalls(HIVE).exists or self.already_pending(HIVE)) and hq.is_idle:
                 if self.can_afford(HIVE):
                     self.do(hq.build(HIVE))
+
 
 
 
@@ -402,8 +561,8 @@ def main():
 def main():
     sc2.run_game(
         sc2.maps.get("AcropolisLE"), [
-        Bot(Race.Zerg, Emptybot()),
-        Bot(Race.Zerg, Hydra_Ling_Bane())
+        Bot(Race.Protoss, Emptybot()),
+        Bot(Race.Zerg, Riceling())
         ], realtime=True,
         save_replay_as="ZvT.SC2Replay",
     )
