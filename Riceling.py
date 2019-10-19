@@ -53,6 +53,8 @@ class Riceling(sc2.BotAI):
         #action
         self.action_scouting = 0
 
+        self.threat_proximity = 11
+
 
         #buildorder
         self.buildorder = [
@@ -196,7 +198,9 @@ class Riceling(sc2.BotAI):
                 self.train_zergling()
 
 
-    async def defend(self, iteration):
+
+
+    async def defend2(self, iteration):
     #Defend looks into a list of known enemy. When there are known enemy, we defend
         defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
         defense_forces_antiair = self.units(HYDRALISK) | self.units(QUEEN)
@@ -209,15 +213,15 @@ class Riceling(sc2.BotAI):
         #print(self.enemy_units)
 
         for structure_type in self.defend_around:
-            #print("1) Hello, defend around", self.defend_around; "Structure type:" structure_type)
+            print("1) Hello, defend around", self.defend_around, "Structure type:", structure_type)
 
             #this loop wasn't entered.
             for structure in self.structures(structure_type):
-                #print("3) structure:", structure, "structure_type", self.structures(structure_type))
+                print("3) structure:", structure, "structure_type", self.structures(structure_type))
 
                 if len(self.enemy_units) > 0:
-                    #print("6) Enemy units: ", self.enemy_units )
-                    #self.enemy_units returns: [Unit(name='Drone', tag=4350017537), Unit(name='Drone', tag=4351852545), Unit(name='Drone', tag=4350279681), Unit(name='Drone', tag=4351328257)]
+                    print("6) Enemy units: ", self.enemy_units )
+
 
                     #all others
                     #iterate over a list of enemy
@@ -261,6 +265,127 @@ class Riceling(sc2.BotAI):
 
             for unit in defense_forces_antiair.idle:
                  self.do(unit.attack(defence_target_air))
+
+
+
+        #for now lets set it to if have 1 defense force, defend. Future we set based on maybe number of units... waiting is too damn painful
+        if defense_forces.amount > len(threats) and len(threats) >= 1:
+            #print("Attempting to defend ground")
+            defence_target = threats[0].position.random_on_distance(random.randrange(1, 3))
+
+            for unit in defense_forces.idle:
+                self.do(unit.attack(defence_target))
+
+
+
+        #in_ability_cast_range
+        #energy_percentage
+
+
+
+
+
+        if forces.amount > 120:
+            print("Prepare for an attack")
+            for unit in forces.idle:
+                self.do(unit.attack(self.finish_them()))
+                self.attacking = 1
+
+
+        #if we are attacking and our units fall below 80, we retreat
+        if self.attacking == 1 and forces.amount <= 80:
+            print("Planning for a retreat")
+            for unit in forces:
+                self.do(unit.move(self.structures(HATCHERY).closest_to(self.game_info.map_center).position.towards(self.game_info.map_center, randrange(8,10))))
+            self.attacking = 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    async def defend(self, iteration):
+    #Defend looks into a list of known enemy. When there are known enemy, we defend
+        defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
+        defense_forces_antiair = self.units(HYDRALISK) | self.units(QUEEN)
+        forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING)
+
+        #Defend your base with 15+ defense force
+        threats = []
+        threats_air = []
+        close_enemy = []
+
+        #print(self.enemy_units)
+
+        #structure loops: 1) loop through each structure type 2) loop through each structure within that specific structure type
+        for structure_type in self.defend_around:
+            print("1) Hello, defend around", self.defend_around, "Structure type:", structure_type)
+            for structure in self.structures(structure_type):
+                #print("3) structure:", structure, "structure_type", self.structures(structure_type))
+
+                #Check to see if there's enemy unit. If so, we see if they're close to the current structure.
+                if len(self.enemy_units) > 0:
+                    print("6) Enemy units: ", self.enemy_units )
+                    print("6.5) close enemy unit list", self.enemy_units.closer_than(self.threat_proximity, structure))
+                    close_enemy = self.enemy_units.closer_than(self.threat_proximity, structure)    #return a list of enemy units that's close to current structure
+                    print("7) Close enemies ", close_enemy)
+                    #self.enemy_units returns: [Unit(name='Drone', tag=4350017537), Unit(name='Drone', tag=4351852545), Unit(name='Drone', tag=4350279681), Unit(name='Drone', tag=4351328257)]
+
+                    if len(close_enemy) > 0:
+                        print("8) close enemy", close_enemy)
+
+                        for enemy in close_enemy:
+                            #6.1) For loop this enemy: Unit(name='Drone', tag=4349755393) type_id: UnitTypeId.DRONE
+                            if enemy.type_id not in self.units_to_ignore_defend and not enemy.is_flying:
+                                #print("6.2) If not units_to ignore", enemy)
+                                #6.2) If not units_to ignore Unit(name='Drone', tag=4349755393)
+                                threats.append(enemy)
+                                #print("6.3) Current threat:", threats)
+                            if enemy.type_id not in self.units_to_ignore_defend and enemy.is_flying:
+                                threats_air.append(enemy)
+
+                #print("7) current threats numbers", len(threats), ":", threats)
+                #keep running this loop until we have a threat.
+                if len(threats) + len(threats_air) > 1:
+                    break
+            if len(threats) + len(threats_air) > 1:
+                break
+
+
+
+
+                #it seems like whatever is scouted gets added to the list???
+                #Attempting to defend ground -> which says everything has been added to the threats regardless of how far away it is.
+
+                #need to check overlord list and see why we send all 3 of them.
+
+
+                #units.can_attack_air
+                #units.can_attack_ground
+                #units.is_flying
+
+
+        #print("current attack value ", self.attacking, "; Forces amount:", forces.amount, "threats", len(threats))
+        if defense_forces_antiair.amount > len(threats_air) and len(threats_air) >= 1:
+            print("Attempting to defend Air")
+            defence_target_air = threats_air[0].position.random_on_distance(random.randrange(1, 3))
+
+            for unit in defense_forces_antiair.idle:
+                 self.do(unit.attack(defence_target_air))
+
 
 
 
@@ -545,18 +670,19 @@ class Riceling(sc2.BotAI):
 
 
 
-
-""" #use this for playing main bot.
+"""
+#use this for playing main bot.
 def main():
     sc2.run_game(
         sc2.maps.get("AcropolisLE"), [
-        Bot(Race.Zerg, Hydra_Ling_Bane()), '
+        Bot(Race.Zerg, Riceling()),
         Computer(Race.Terran, Difficulty.Harder)
-        ], realtime=False,
+        ], realtime=True,
         save_replay_as="ZvT.SC2Replay",
     )
-"""
 
+
+"""
 #use this if playing against main bot
 def main():
     sc2.run_game(
@@ -566,6 +692,7 @@ def main():
         ], realtime=True,
         save_replay_as="ZvT.SC2Replay",
     )
+
 
 
 if __name__ == "__main__":
