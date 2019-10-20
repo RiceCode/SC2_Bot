@@ -41,19 +41,23 @@ class Riceling(sc2.BotAI):
 
     def __init__(self):
 
-        self.overlord_list = []              #set up the list -> but put outside it won't recognize..; put inside -> second iteration will clear everything.
+        #overlord and scoutng
+        self.overlord_list = []              #list of overlord - used for overlord scouting.
         self.overlord_timer = 0        #in seconds, we determine when to send our overlord to scout
+        self.action_scouting = 0
+
+        #defend/attack
         self.defend_around = [HATCHERY, LAIR, HIVE, EXTRACTOR, DRONE]
         self.attacking = 0
+        self.threat_proximity = 11
+
 
         #ideal units
         self.ideal_mutalisk = 0
         self.ideal_corrupter = 0
 
-        #action
-        self.action_scouting = 0
+        self.numBase = 2    #default
 
-        self.threat_proximity = 11
 
 
         #buildorder
@@ -156,7 +160,6 @@ class Riceling(sc2.BotAI):
 
 
     async def on_step(self, iteration):
-        numBase = 2
         if iteration == 0:
             await self.chat_send("(glhf)")
 
@@ -166,14 +169,14 @@ class Riceling(sc2.BotAI):
 
         if self.buildorder[self.buildorder_step] == "END":
             await self.distribute_workers() # in sc2/bot_ai.py
-            await self.expand(numBase)
+            await self.expand()
             await self.base_management()
             await self.overlord_management()
-            await self.drone_management(numBase)
+            await self.drone_management()
             await self.extractor_build()
             await self.build_baneling()
             await self.defend(iteration)
-            await self.queen(numBase)
+            await self.queen()
             await self.build_hydralisk()
             await self.infestation_pit()
             await self.force()
@@ -196,123 +199,6 @@ class Riceling(sc2.BotAI):
                 self.train_baneling()
             else:
                 self.train_zergling()
-
-
-
-
-    async def defend2(self, iteration):
-    #Defend looks into a list of known enemy. When there are known enemy, we defend
-        defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
-        defense_forces_antiair = self.units(HYDRALISK) | self.units(QUEEN)
-        forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING)
-
-        #Defend your base with 15+ defense force
-        threats = []
-        threats_air = []
-
-        #print(self.enemy_units)
-
-        for structure_type in self.defend_around:
-            print("1) Hello, defend around", self.defend_around, "Structure type:", structure_type)
-
-            #this loop wasn't entered.
-            for structure in self.structures(structure_type):
-                print("3) structure:", structure, "structure_type", self.structures(structure_type))
-
-                if len(self.enemy_units) > 0:
-                    print("6) Enemy units: ", self.enemy_units )
-
-
-                    #all others
-                    #iterate over a list of enemy
-                    for enemy in self.enemy_units:
-                        #print("6.1) For loop this enemy:", enemy, "type_id:", enemy.type_id)
-                        #6.1) For loop this enemy: Unit(name='Drone', tag=4349755393) type_id: UnitTypeId.DRONE
-                        if enemy.type_id not in self.units_to_ignore_defend and not enemy.is_flying:
-                            #print("6.2) If not units_to ignore", enemy)
-                            #6.2) If not units_to ignore Unit(name='Drone', tag=4349755393)
-                            #  threats += enemy #does this need to be typeid??
-                            threats.append(enemy)
-                            #print("6.3) Current threat:", threats)
-                        if enemy.type_id not in self.units_to_ignore_defend and enemy.is_flying:
-                            threats_air.append(enemy)
-
-                #print("7) current threats numbers", len(threats), ":", threats)
-                #keep running this loop until we have a threat.
-                if len(threats) + len(threats_air) > 1:
-                    break
-            if len(threats) + len(threats_air) > 1:
-                break
-
-
-
-
-                #it seems like whatever is scouted gets added to the list???
-                #Attempting to defend ground -> which says everything has been added to the threats regardless of how far away it is.
-
-                #need to check overlord list and see why we send all 3 of them.
-
-
-                #units.can_attack_air
-                #units.can_attack_ground
-                #units.is_flying
-
-
-        #print("current attack value ", self.attacking, "; Forces amount:", forces.amount, "threats", len(threats))
-        if defense_forces_antiair.amount > len(threats_air) and len(threats_air) >= 1:
-            print("Attempting to defend Air")
-            defence_target_air = threats_air[0].position.random_on_distance(random.randrange(1, 3))
-
-            for unit in defense_forces_antiair.idle:
-                 self.do(unit.attack(defence_target_air))
-
-
-
-        #for now lets set it to if have 1 defense force, defend. Future we set based on maybe number of units... waiting is too damn painful
-        if defense_forces.amount > len(threats) and len(threats) >= 1:
-            #print("Attempting to defend ground")
-            defence_target = threats[0].position.random_on_distance(random.randrange(1, 3))
-
-            for unit in defense_forces.idle:
-                self.do(unit.attack(defence_target))
-
-
-
-        #in_ability_cast_range
-        #energy_percentage
-
-
-
-
-
-        if forces.amount > 120:
-            print("Prepare for an attack")
-            for unit in forces.idle:
-                self.do(unit.attack(self.finish_them()))
-                self.attacking = 1
-
-
-        #if we are attacking and our units fall below 80, we retreat
-        if self.attacking == 1 and forces.amount <= 80:
-            print("Planning for a retreat")
-            for unit in forces:
-                self.do(unit.move(self.structures(HATCHERY).closest_to(self.game_info.map_center).position.towards(self.game_info.map_center, randrange(8,10))))
-            self.attacking = 0
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -433,10 +319,9 @@ class Riceling(sc2.BotAI):
         if current_step == "END" or not self.can_afford(current_step):
             return
         if current_step == UnitTypeId.HATCHERY:
-            await self.expand(2)
+            await self.expand()
+            rint(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name} ")
             self.buildorder_step += 1
-
-
 
         # check if current step needs larva
         if current_step in self.from_larva and self.larva:
@@ -444,17 +329,26 @@ class Riceling(sc2.BotAI):
             print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name} ")
             self.buildorder_step += 1
 
-
-
         # check if current step needs drone
         elif current_step in self.from_drone:
             if current_step == UnitTypeId.EXTRACTOR:
-                # get geysers that dont have extractor on them
-                geysers = self.vespene_geyser.filter(
-                    lambda g: all(g.position != e.position for e in self.units(UnitTypeId.EXTRACTOR))
-                )
-                # pick closest
-                position = geysers.closest_to(self.start_location)
+                await self.extractor_build()
+                print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
+                self.buildorder_step += 1
+
+
+            elif current_step == UnitTypeId.SPAWNINGPOOL:
+                await self.spawningpool_build()
+                print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
+                self.buildorder_step += 1
+
+        elif current_step == UnitTypeId.QUEEN:
+            await self.queen()
+            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
+            self.buildorder_step += 1
+
+            """
+
             else:
                 if current_step == UnitTypeId.ROACHWARREN:
                     # check tech requirement
@@ -474,15 +368,9 @@ class Riceling(sc2.BotAI):
             worker = self.workers.closest_to(position)
             self.do(worker.build(current_step, position))
             print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
-            self.buildorder_step += 1
-        elif current_step == UnitTypeId.QUEEN:
-            # tech requirement check
-            if not self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                return
-            hatch = self.townhalls(UnitTypeId.HATCHERY).first
-            self.do(hatch.train(UnitTypeId.QUEEN))
-            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
-            self.buildorder_step += 1
+            """
+
+
 
 
     async def build_hydralisk(self):
@@ -520,16 +408,18 @@ class Riceling(sc2.BotAI):
 
     async def extractor_build(self):
         #only start extractor when we got spawning pool or started one.
-        if self.structures(SPAWNINGPOOL).ready.exists or self.already_pending(SPAWNINGPOOL):
-            if not self.already_pending(EXTRACTOR) and self.can_afford(EXTRACTOR):
-                drone = self.workers.random
-                target = self.vespene_geyser.closest_to(drone.position)
-                self.do(drone.build(EXTRACTOR, target))
+        if not self.already_pending(EXTRACTOR) and self.can_afford(EXTRACTOR):
+            drone = self.workers.random
+            target = self.vespene_geyser.closest_to(drone.position) #or use closest_to(self.start_location)
+            self.do(drone.build(EXTRACTOR, target))
 
-    async def drone_management(self, numBase):
+
+
+
+    async def drone_management(self):
         #create drones when possible; set limit to 60
         #if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*numBase:
-        if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*numBase:
+        if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*self.numBase:
             #print("Current drone amount ", self.units(DRONE).amount)
             self.do(self.units(LARVA).random.train(DRONE))
 
@@ -540,9 +430,9 @@ class Riceling(sc2.BotAI):
 
 
     #Only allow 3 expansion max
-    async def expand(self, numBase):
+    async def expand(self):
         #3 base start
-        if (self.structures(HATCHERY).amount + self.structures(LAIR).amount + self.structures(HIVE).amount )  <= numBase :
+        if (self.structures(HATCHERY).amount + self.structures(LAIR).amount + self.structures(HIVE).amount )  <= self.numBase :
             if self.can_afford(HATCHERY) and  not self.already_pending(HATCHERY):
                 await self.expand_now()
 
@@ -614,9 +504,9 @@ class Riceling(sc2.BotAI):
 
 
 
-    async def queen(self, numBase):
+    async def queen(self):
         #build some queen, maximum = numBase
-        if self.units(QUEEN).amount <= numBase*2:
+        if self.units(QUEEN).amount <= self.numBase*2:
             if self.can_afford(QUEEN) and self.structures(SPAWNINGPOOL).exists and not self.already_pending(QUEEN):
                 self.do(self.townhalls.first.train(QUEEN))
         #queen do injects
@@ -627,14 +517,19 @@ class Riceling(sc2.BotAI):
 
 
 
-
-    async def base_management(self):
-        hq = self.townhalls.first
+    async def spawningpool_build(self):
         #always have spawningpool
         if not (self.structures(SPAWNINGPOOL).exists or self.already_pending(SPAWNINGPOOL)):
             if self.can_afford(SPAWNINGPOOL):
                 await self.build(SPAWNINGPOOL, near=self.townhalls.first.position.towards(self.game_info.map_center,5))
                 #near=self.townhalls.first.position.towards(mineral_patch,-5))
+
+
+
+
+    async def base_management(self):
+        hq = self.townhalls.first
+        await self.spawningpool_build()
 
         #upgrade zergling speed
         if self.structures(SPAWNINGPOOL).ready.exists:
@@ -657,6 +552,7 @@ class Riceling(sc2.BotAI):
             if not (self.townhalls(HIVE).exists or self.already_pending(HIVE)) and hq.is_idle:
                 if self.can_afford(HIVE):
                     self.do(hq.build(HIVE))
+
 
 
 
