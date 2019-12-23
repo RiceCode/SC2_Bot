@@ -12,7 +12,12 @@ from sc2.player import Bot, Computer
 from sc2.unit import Unit
 from sc2.units import Units
 from random import randrange
-
+from sc2 import position
+import math
+from operator import itemgetter
+import cv2
+import numpy as np
+import time
 
 
 
@@ -45,6 +50,14 @@ class Riceling(sc2.BotAI):
         self.overlord_list = []              #list of overlord - used for overlord scouting.
         self.overlord_timer = 0        #in seconds, we determine when to send our overlord to scout
         self.action_scouting = 0
+        self.target_base_order = []
+        self.known_enemy_units = []
+        self.known_enemy_name = []
+
+
+        self.queen_inject = []
+        self.townhall_order = []
+        self.queen_creep = []
 
         #defend/attack
         self.defend_around = [HATCHERY, LAIR, HIVE, EXTRACTOR, DRONE]
@@ -57,7 +70,6 @@ class Riceling(sc2.BotAI):
         self.ideal_corrupter = 0
 
         self.numBase = 2    #default
-
 
 
         #buildorder
@@ -86,7 +98,7 @@ class Riceling(sc2.BotAI):
 
         self.units_to_ignore_defend = [
             UnitTypeId.KD8CHARGE,
-            UnitTypeId.REAPER,
+            #UnitTypeId.REAPER,
             UnitTypeId.BANELING,
             UnitTypeId.EGG,
             UnitTypeId.LARVA,
@@ -100,11 +112,96 @@ class Riceling(sc2.BotAI):
 
 
 
+
+
     def select_target(self):
         if self.enemy_units.exists:
             return random.choice(self.enemy_units).position
         if self.enemy_structures.exists:
             return random.choice(self.enemy_structures).position
+
+
+
+
+    def scouting_cloeset_enemybase(self, target, baseoptions, target_list):
+        # Determine which base is closest to the target.
+        # takes target = the closest base; base option = all option; target_list = used up targets
+        # Returns the Point2 of the closest base to target.
+
+        scouting_targets = {}
+        for c_expansion in baseoptions:
+            #print("c_expansion", c_expansion)
+            #print("target_list", target_list)
+
+            if c_expansion not in target_list:
+                #print("not in")
+
+                #enemy starting base
+                x0 = self.enemy_start_locations[0][0]
+                y0 = self.enemy_start_locations[0][1]
+
+                #target
+                x1 = target[0]
+                y1 = target[1]
+
+                #base option list
+                x2 = c_expansion[0]
+                y2 = c_expansion[1]
+
+                #expansion score from enemy -- it's now based on enemy's first base because of the weight.
+                score = (abs(x1-x2) + abs(y1-y2)*1) + (abs(x1-x0) + abs(y1-y0) *2)
+
+                #add to the list. Current score : expansion point2
+                scouting_targets[score] = c_expansion
+
+
+
+        #print("####current")
+        #print(scouting_targets)
+
+
+        #list out all the keys
+        closest_key = 1000000
+        for score in scouting_targets:
+            if score < closest_key:
+                closest_key = score
+
+
+        closest_to_target = scouting_targets[closest_key]               #get the point2 based on minimum score
+
+        return closest_to_target    #return the Point2 of the closest base
+
+
+    def scouting_targets(self):
+        #creates a list starting with the enemy's closest expansion.
+        #return a list of Point2 of potential expansion location
+        target_list = []
+        result = "temp"
+        enemy_base = {}      #create a new dictionary - so it won't make enemy_base point to self.expansion_locations.
+        enemy_base = self.expansion_locations   #dictionary of all the base locations
+
+        numberofexpansion = len(enemy_base)
+        x = 0   #ensure first run check against enemy base
+
+
+        while x < numberofexpansion:
+            #first run will look into enemy base vs all possible combination.
+            if x == 0:
+                result = self.scouting_cloeset_enemybase(self.enemy_start_locations[0], enemy_base, target_list)
+            else:
+                result = self.scouting_cloeset_enemybase(result, enemy_base, target_list)
+
+            target_list.append(result)
+
+            #POP MIGHT BE AN ISSUE.
+            #enemy_base.pop(result)        #remove item from dictionary once we finish looking at it.
+            numberofexpansion = len(enemy_base)
+            x+=1
+
+        #print("#############")
+        #print(target_list)
+
+        return(target_list)
 
 
 
@@ -162,13 +259,19 @@ class Riceling(sc2.BotAI):
     async def on_step(self, iteration):
         if iteration == 0:
             await self.chat_send("(glhf)")
+            await self.setup_scouting_order()
+
 
 
         await self.distribute_workers() # in sc2/bot_ai.py
+        await self.intel()
         await self.do_buildorder()
+
+
 
         if self.buildorder[self.buildorder_step] == "END":
             await self.distribute_workers() # in sc2/bot_ai.py
+            await self.scouting_management()
             await self.expand()
             await self.base_management()
             await self.overlord_management()
@@ -182,7 +285,10 @@ class Riceling(sc2.BotAI):
             await self.force()
 
 
-
+    async def setup_scouting_order(self):
+        self.target_base_order = self.scouting_targets()
+        print("Scouting Target Order:")
+        print(self.target_base_order)
 
 
 
@@ -218,17 +324,14 @@ class Riceling(sc2.BotAI):
 
         #structure loops: 1) loop through each structure type 2) loop through each structure within that specific structure type
         for structure_type in self.defend_around:
-            print("1) Hello, defend around", self.defend_around, "Structure type:", structure_type)
+            #print("1) Hello, defend around", self.defend_around, "Structure type:", structure_type)
             for structure in self.structures(structure_type):
                 #print("3) structure:", structure, "structure_type", self.structures(structure_type))
 
                 #Check to see if there's enemy unit. If so, we see if they're close to the current structure.
                 if len(self.enemy_units) > 0:
-                    print("6) Enemy units: ", self.enemy_units )
-                    print("6.5) close enemy unit list", self.enemy_units.closer_than(self.threat_proximity, structure))
                     close_enemy = self.enemy_units.closer_than(self.threat_proximity, structure)    #return a list of enemy units that's close to current structure
-                    print("7) Close enemies ", close_enemy)
-                    #self.enemy_units returns: [Unit(name='Drone', tag=4350017537), Unit(name='Drone', tag=4351852545), Unit(name='Drone', tag=4350279681), Unit(name='Drone', tag=4351328257)]
+                    #print("7) Close enemies ", close_enemy)
 
                     if len(close_enemy) > 0:
                         print("8) close enemy", close_enemy)
@@ -237,7 +340,6 @@ class Riceling(sc2.BotAI):
                             #6.1) For loop this enemy: Unit(name='Drone', tag=4349755393) type_id: UnitTypeId.DRONE
                             if enemy.type_id not in self.units_to_ignore_defend and not enemy.is_flying:
                                 #print("6.2) If not units_to ignore", enemy)
-                                #6.2) If not units_to ignore Unit(name='Drone', tag=4349755393)
                                 threats.append(enemy)
                                 #print("6.3) Current threat:", threats)
                             if enemy.type_id not in self.units_to_ignore_defend and enemy.is_flying:
@@ -249,15 +351,6 @@ class Riceling(sc2.BotAI):
                     break
             if len(threats) + len(threats_air) > 1:
                 break
-
-
-
-
-                #it seems like whatever is scouted gets added to the list???
-                #Attempting to defend ground -> which says everything has been added to the threats regardless of how far away it is.
-
-                #need to check overlord list and see why we send all 3 of them.
-
 
                 #units.can_attack_air
                 #units.can_attack_ground
@@ -289,9 +382,6 @@ class Riceling(sc2.BotAI):
         #energy_percentage
 
 
-
-
-
         if forces.amount > 120:
             print("Prepare for an attack")
             for unit in forces.idle:
@@ -320,7 +410,7 @@ class Riceling(sc2.BotAI):
             return
         if current_step == UnitTypeId.HATCHERY:
             await self.expand()
-            rint(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name} ")
+            print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name} ")
             self.buildorder_step += 1
 
         # check if current step needs larva
@@ -346,6 +436,10 @@ class Riceling(sc2.BotAI):
             await self.queen()
             print(f"{self.time_formatted} STEP {self.buildorder_step} {current_step.name}")
             self.buildorder_step += 1
+
+
+
+
 
             """
 
@@ -417,11 +511,11 @@ class Riceling(sc2.BotAI):
 
 
     async def drone_management(self):
-        #create drones when possible; set limit to 60
-        #if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*numBase:
-        if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*self.numBase:
-            #print("Current drone amount ", self.units(DRONE).amount)
-            self.do(self.units(LARVA).random.train(DRONE))
+        #create drones when possible; set limit to 80 (each base has 20)
+        if self.numBase <= 4:
+            if self.can_afford(DRONE) and self.units(LARVA).exists and self.units(DRONE).amount <= 20*self.numBase:
+                #print("Current drone amount ", self.units(DRONE).amount)
+                self.do(self.units(LARVA).random.train(DRONE))
 
         #drones that are idle
         for drone in self.units(DRONE).idle:
@@ -441,6 +535,61 @@ class Riceling(sc2.BotAI):
             if self.minerals > 2500:
                 if self.can_afford(HATCHERY) and  not self.already_pending(HATCHERY):
                     await self.expand_now()
+                    self.numBase += 1
+
+
+
+    async def scouting_management(self):
+        #target = list of Point2 based on priorities
+        #First start by sending our first overlord directly into the enemy's base. Must be not scouting (action_scouting = 0) and wasn't scouting in the last 80 seconds (as defined by overlord_timer)
+
+        #1st phase: able to send 1 overlord to each expansion.
+        #2nd phase: determine sending zergling or overlord to the location
+
+
+
+        #self.target_base_order
+        if self.action_scouting == 0 and self.time >= self.overlord_timer:
+            self.action_scouting = 1
+            print("Sending overlord at ", self.time_formatted)
+            #assign all overlord to the list
+            for overlord in self.units(OVERLORD).idle:
+                self.overlord_list.append(overlord)
+
+
+            i = 0 #counter used for sending overlord to expansions
+
+            #loop through all overlord available. Only send enough overlord to cover the number of enemy possible base.
+            while i < len(self.overlord_list):
+                if i < len(self.target_base_order):
+                    self.do(self.overlord_list[i].move(self.target_base_order[i]))
+                i+= 1
+
+
+
+            #manual movement
+            #go_to_position = position.Point2(position.Pointlike((x, y)))
+            #self.do(self.overlord_list[0].move(go_to_position))
+
+            #send to enemy base
+            #print("First overlord in list", self.overlord_list[0])               #returns the first overlord's [name, tag]
+            #self.do(self.overlord_list[0].move(self.enemy_start_locations[0]))   #successfully moved the overlord
+
+
+
+        #check to see if overlord is dead
+        if len(self.overlord_list) >= 1:
+            for overlord in self.overlord_list:
+                if overlord not in self.units(OVERLORD):
+                    print("One of the overlord is dead, resetting everything")
+                    #reset everything
+                    self.action_scouting = 0
+                    self.overlord_list.clear()  #reset the list
+                    self.overlord_timer = self.time + 80                        #time is in seconds. We're going to send next overlord in 80 seconds.
+                    print("Next overlord scout = ", self.overlord_timer, "which is:", self.overlord_timer/60, "min")
+                    self.train_overlord()
+
+
 
 
 
@@ -454,6 +603,9 @@ class Riceling(sc2.BotAI):
             We also manage scouting with overlord. Currently sending one to the main base of enemy. Send new one every 80 secs when previous one dies.
             todo: scout multiple base; scouting route.
         """
+
+        #start = self.start_location()
+
 
         #Early game
         if self.supply_left < 2 and self.game_stage() == "early":
@@ -475,29 +627,9 @@ class Riceling(sc2.BotAI):
                 print("started research")
 
 
-        #First start by sending our first overlord directly into the enemy's base. Must be not scouting (action_scouting = 0) and wasn't scouting in the last 80 seconds (as defined by overlord_timer)
-        if self.action_scouting == 0 and self.time >= self.overlord_timer:
-            self.action_scouting = 1
-            print("Sending overlord at ", self.time_formatted)
-            #assign all overlord to the list
-            for overlord in self.units(OVERLORD).idle:
-                self.overlord_list.append(overlord)
-                break
-
-            print("First overlord in list", self.overlord_list[0])               #returns the first overlord's [name, tag]
-            self.do(self.overlord_list[0].move(self.enemy_start_locations[0]))   #successfully moved the overlord
 
 
-        #When our overlord dies, we reset everything
-        if len(self.overlord_list) >= 1:
-            if self.overlord_list[0] not in self.units(OVERLORD):
-                print("Scouting Overlord is dead, resetting scouting")
-                #reset everything
-                self.action_scouting = 0
-                self.overlord_list.clear()  #reset the list
-                self.overlord_timer = self.time + 80                        #time is in seconds. We're going to send next overlord in 80 seconds.
-                print("Next overlord scout = ", self.overlord_timer, "which is:", self.overlord_timer/60, "min")
-                self.train_overlord()                                         #overlord is going to die, so train a new one.
+
 
 
 
@@ -506,14 +638,94 @@ class Riceling(sc2.BotAI):
 
     async def queen(self):
         #build some queen, maximum = numBase
-        if self.units(QUEEN).amount <= self.numBase*2:
+        if self.units(QUEEN).amount <= self.numBase*3:
             if self.can_afford(QUEEN) and self.structures(SPAWNINGPOOL).exists and not self.already_pending(QUEEN):
                 self.do(self.townhalls.first.train(QUEEN))
-        #queen do injects
+
+        #queen inject - assign townhall to list
+        for th in self.townhalls:
+            if th not in self.townhall_order:
+                self.townhall_order.append(th)
+
+        #queen inject - assign queen to list
+        if len(self.queen_inject) <= self.numBase:
+            self.queen_creep.clear()                    #prevent two roles
+            for queen in self.units(QUEEN).idle:
+                if queen not in self.queen_inject:
+                    self.queen_inject.append(queen)
+
+        #queen inject - queen[1] on townhall[1] etc
+        i = 0
+        while i < len(self.queen_inject):
+            if i < len(self.townhall_order):
+                abilities = await self.get_available_abilities(self.queen_inject[i])
+                if AbilityId.EFFECT_INJECTLARVA in abilities:
+                    self.do(self.queen_inject[i](EFFECT_INJECTLARVA, self.townhall_order[i]))
+            i += 1
+
+
+
+        #queen creep - assign queen to creep list
         for queen in self.units(QUEEN).idle:
+            if queen not in self.queen_inject:
+                self.queen_creep.append(queen)
+
+
+        #queen creep - find legal placement and place.
+        for queen in self.queen_inject:
             abilities = await self.get_available_abilities(queen)
-            if AbilityId.EFFECT_INJECTLARVA in abilities:
-                self.do(queen(EFFECT_INJECTLARVA, self.townhalls.first))
+            if AbilityId.BUILD_CREEPTUMOR_QUEEN in abilities and queen.is_idle:
+                x = random.randrange(0, round(self.game_info.map_size[0], 0))
+                y = random.randrange(0, round(self.game_info.map_size[1], 0))
+                print("creating position")
+                position_placement = position.Point2(position.Pointlike((x, y)))
+
+                if self.can_place(BUILD_CREEPTUMOR_QUEEN, position) and self.has_creep(position_placement):
+                    print("can place here: ", position_placement)
+                    time.sleep(25)
+                    abc = await self.do(queen(BUILD_CREEPTUMOR_QUEEN, position))    #problem here
+                    print(abc)
+                    #print(self.do(queen))
+
+
+
+
+        #Reassign - check to see if queen is dead
+        if len(self.queen_inject) >= 1:
+            for queen in self.queen_inject:
+                if queen not in self.units(QUEEN):
+                    print("One of the queen is dead")
+                    self.queen_inject.clear()  #reset the list
+                    self.queen_creep.clear()
+
+        #Reassign - check to see if townhall is dead
+        if len(self.townhall_order) >= 1:
+            for th in self.townhall_order:
+                if th not in self.townhalls:
+                    print("One of the townhall is dead")
+                    self.townhall.clear()  #reset the list
+
+
+
+
+
+
+        #map_center = self.game_info.map_center
+        #position_towards_map_center = self.start_location.towards(map_center, distance=5)
+        #await self.build(UnitTypeId.CREEPTUMORQUEEN, near=position_towards_map_center, placement_step=1)
+
+
+
+        #CREEPTUMOR
+        #CREEPTUMORQUEEN
+
+        #queen do creep
+        #print("position = ", position_towards_map_center)
+
+        #for queen in self.queen_creep:
+        #    self.do(queen(BUILD_CREEPTUMOR_QUEEN, position_towards_map_center))
+        #    self.build(UnitTypeId.CREEPTUMORQUEEN, near=position_towards_map_center, placement_step=1)
+
 
 
 
@@ -524,34 +736,131 @@ class Riceling(sc2.BotAI):
                 await self.build(SPAWNINGPOOL, near=self.townhalls.first.position.towards(self.game_info.map_center,5))
                 #near=self.townhalls.first.position.towards(mineral_patch,-5))
 
+    async def intel(self):
+        game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
+        draw_dict = {
+            #ARMY
+            ZERGLING: [3, (255, 100, 1)],
+            HYDRALISK: [3, (255, 100, 2)],
+            BANELING: [3, (255, 100, 3)],
+            QUEEN: [3, (255, 100, 4)],
 
+            #BUILDING AND ECON
+            HATCHERY: [15, (0, 255, 0)],
+            LAIR: [15, (0, 255, 0)],
+            HIVE: [15, (0, 255, 0)],
+            EXTRACTOR: [2, (55, 200, 0)],
+            DRONE: [1, (55, 200, 0)],
+            OVERLORD: [3, (20, 235, 0)],
+            SPAWNINGPOOL: [3, (200, 100, 0)],
+            HYDRALISKDEN: [3, (150, 150, 0)],
+            INFESTATIONPIT: [5, (255, 0, 0)]
+
+        }
+
+        for unit_type in draw_dict:
+            for unit in self.units(unit_type).ready:
+                pos = unit.position
+                cv2.circle(game_data, (int(pos[0]), int(pos[1])), draw_dict[unit_type][0], draw_dict[unit_type][1], -1)
+
+
+        """
+        for enemy_building in self.known_enemy_structures:
+            pos = enemy_building.position
+            cv2.circle(game_data, (int(pos[0]), int(pos[1])), 5, (200, 50, 212), -1)
+        """
+
+
+
+
+
+
+        #Adding enemy units and structure to stored list. Todo: add something to remove dead units.
+        if self.enemy_units.exists:
+            for enemy in self.enemy_units.ready:
+                if enemy not in self.known_enemy_units:
+                    self.known_enemy_units.append(enemy)
+                    self.known_enemy_name.append(enemy.name)
+        if self.enemy_structures.exists:
+            for enemy in self.enemy_structures.ready:
+                if enemy not in self.known_enemy_units:
+                    self.known_enemy_units.append(enemy)
+                    self.known_enemy_name.append(enemy.name)
+
+
+
+
+        if len(self.known_enemy_units) > 1:
+            worker_names = ["probe", "scv", "drone"]
+            for enemy in self.known_enemy_units:
+                if enemy.name.lower() in worker_names:
+                    cv2.circle(game_data, (int(enemy.position[0]), int(enemy.position[1])), 1, (55, 0, 155), -1)
+                else:
+                    cv2.circle(game_data, (int(enemy.position[0]), int(enemy.position[1])), 3, (50, 0, 215), -1)
+
+
+
+
+
+
+         # flip horizontally to make our final fix in visual representation:
+        flipped = cv2.flip(game_data, 0)
+        resized = cv2.resize(flipped, dsize=None, fx=2, fy=2)
+
+        cv2.imshow('Intel', resized)
+        cv2.waitKey(1)
+
+        #print(self.known_enemy)
+
+
+
+
+        #
+        #    return random.choice(self.enemy_structures).position
 
 
     async def base_management(self):
         hq = self.townhalls.first
         await self.spawningpool_build()
 
+        """ #old code
         #upgrade zergling speed
         if self.structures(SPAWNINGPOOL).ready.exists:
             pool = self.structures(SPAWNINGPOOL).ready.first
             abilities = await self.get_available_abilities(pool)
             if AbilityId.RESEARCH_ZERGLINGMETABOLICBOOST in abilities and self.can_afford(AbilityId.RESEARCH_ZERGLINGMETABOLICBOOST):
                 self.do(pool(AbilityId.RESEARCH_ZERGLINGMETABOLICBOOST))
-        if self.structures(SPAWNINGPOOL).ready.exists and self.structures(HIVE).ready.exists:
-            if AbilityId.RESEARCH_ZERGLINGADRENALGLANDS in abilities and self.can_afford(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS):
-                self.do(pool(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS))
+        """
 
-        #upgrade townhall
+
+        #HATCHERY technology
+        self.research(UpgradeId.ZERGLINGMOVEMENTSPEED)
+
+
+        #upgrade to LAIR
         if self.structures(SPAWNINGPOOL).ready.exists:
             if not (self.townhalls(LAIR).exists or self.already_pending(LAIR)) and hq.is_idle:
                 if self.can_afford(LAIR):
                     self.do(hq.build(LAIR))
 
-        #upgrade townhall again
+        #LAIR technology
+        #hydra done in its own function
+
+
+        #upgrade to HIVE
         if self.structures(LAIR).ready.exists and self.structures(INFESTATIONPIT).ready.exists:
             if not (self.townhalls(HIVE).exists or self.already_pending(HIVE)) and hq.is_idle:
                 if self.can_afford(HIVE):
                     self.do(hq.build(HIVE))
+
+
+        #Hive technology
+        if self.structures(HIVE).exists:
+            if self.structures(SPAWNINGPOOL).ready.exists:
+                pool = self.structures(SPAWNINGPOOL).ready.first
+                abilities = await self.get_available_abilities(pool)
+                if AbilityId.RESEARCH_ZERGLINGADRENALGLANDS in abilities and self.can_afford(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS):
+                    self.do(pool(AbilityId.RESEARCH_ZERGLINGADRENALGLANDS))
 
 
 
@@ -566,14 +875,15 @@ class Riceling(sc2.BotAI):
 
 
 
-"""
+
 #use this for playing main bot.
 def main():
     sc2.run_game(
         sc2.maps.get("AcropolisLE"), [
         Bot(Race.Zerg, Riceling()),
-        Computer(Race.Terran, Difficulty.Harder)
-        ], realtime=True,
+        #Computer(Race.Terran, Difficulty.Harder)
+        Computer(Race.Terran, Difficulty.Medium)
+        ], realtime=False,
         save_replay_as="ZvT.SC2Replay",
     )
 
@@ -585,10 +895,10 @@ def main():
         sc2.maps.get("AcropolisLE"), [
         Bot(Race.Protoss, Emptybot()),
         Bot(Race.Zerg, Riceling())
-        ], realtime=True,
+        ], realtime=False,
         save_replay_as="ZvT.SC2Replay",
     )
-
+"""
 
 
 if __name__ == "__main__":

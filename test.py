@@ -36,14 +36,10 @@ for enemy in enemy_list:
         print(enemy)
 """
 
-list = ["Unit(name='Overlord', tag=4355522561)", "Unit(name='Overlord', tag=4352114690)"]
-current = "Unit(name='Overlord', tag=4355522561)"
-list = ["Unit(name='Overlord', tag=4352114690)"]
-
-if current not in list:
-    print("no")
-else:
-    print("yes")
-
-
-
+thisdict =  {
+  "brand": "Ford",
+  "model": "Mustang",
+  "year": 1964
+}
+thisdict.pop("ssmodel")
+print(thisdict)
