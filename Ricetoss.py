@@ -45,6 +45,9 @@ class Ricetoss(sc2.BotAI):
 
 
     def __init__(self):
+        self.probe_scouting = 0 #1 = scouting, 0 = not scouting
+        self.probe_scouter = 'abc'
+
 
         #buildorder
         self.buildorder = [
@@ -221,7 +224,7 @@ class Ricetoss(sc2.BotAI):
             await self.intel()
             await self.build_assimilators()
             await self.build_offensive_buildings()
-            await self.build_offensive_force()
+            await self.build_army()
             await self.expand()
 
 
@@ -229,7 +232,7 @@ class Ricetoss(sc2.BotAI):
 
 
 
-    """
+
     async def defend(self, iteration):
     #Defend looks into a list of known enemy. When there are known enemy, we defend
         defense_forces = self.units(ZERGLING) | self.units(HYDRALISK) | self.units(BANELING) | self.units(QUEEN)
@@ -313,18 +316,31 @@ class Ricetoss(sc2.BotAI):
                 self.do(unit.move(self.structures(HATCHERY).closest_to(self.game_info.map_center).position.towards(self.game_info.map_center, randrange(8,10))))
             self.attacking = 0
 
-    """
-
 
 
     async def scout(self):
-        if len(self.units(OBSERVER)) > 0:
+        #always scout
+        enemy_location = self.enemy_start_locations[0]
+        #move_to = self.random_location_variance(enemy_location)
+        move_to = enemy_location
+
+        #Probe scout if no observer and no one going
+        if len(self.units(OBSERVER)) == 0 and self.probe_scouting == 0:
+            probe = self.workers.random
+            self.probe_scouting = 1
+            self.probe_scouter = probe
+            print("printing probe", probe)
+            print("priting saved probe", self.probe_scouter)
+            self.do(probe.move(move_to))
+        #check if probe died
+
+
+
+
+
+        elif len(self.units(OBSERVER)) > 0:
             scout = self.units(OBSERVER)[0]
             if scout.is_idle:
-                enemy_location = self.enemy_start_locations[0]
-                #move_to = self.random_location_variance(enemy_location)
-                move_to = enemy_location
-                print(move_to)
                 self.do(scout.move(move_to))
 
         else:
@@ -355,25 +371,28 @@ class Ricetoss(sc2.BotAI):
             target = self.vespene_geyser.closest_to(worker.position) #or use closest_to(self.start_location)
             self.do(worker.build(ASSIMILATOR, target))
 
+    def build_zealot(self):
+        for gw in self.structures(GATEWAY).ready.idle:
+            if self.can_afford(ZEALOT) and self.supply_left > 0:
+                self.do(gw.train(ZEALOT))
 
+    def build_stalker(self):
+        for gw in self.structures(GATEWAY).ready.idle:
+            if self.can_afford(STALKER) and self.supply_left > 0:
+                self.do(gw.train(STALKER))
 
-
-
-
-    async def expand(self):
-        #expand if we can afford + not building one + if there's at least 18 probe per nexus
-        if self.can_afford(NEXUS) and not self.already_pending(NEXUS) and len(self.units(PROBE))* len(self.structures(NEXUS)) > 18*len(self.structures(NEXUS)):
-            await self.expand_now()
-
-        #redistribute idles.
-        for probes in self.units(PROBE).idle:
-            await self.distribute_workers()
-
-
-    async def build_offensive_force(self):
+    def build_voidray(self):
         for sg in self.structures(STARGATE).ready.idle:
             if self.can_afford(VOIDRAY) and self.supply_left > 0:
                 self.do(sg.train(VOIDRAY))
+
+
+    async def build_army(self):
+        #determine what to build
+        #for now only build zealot
+        self.build_stalker()
+
+
 
 
     async def build_offensive_buildings(self):
@@ -399,6 +418,21 @@ class Ricetoss(sc2.BotAI):
                 if len(self.structures(STARGATE)) < 3:
                     if self.can_afford(STARGATE) and not self.already_pending(STARGATE):
                         await self.build(STARGATE, near=pylon)
+
+
+
+
+
+    async def expand(self):
+        #expand if we can afford + not building one + if there's at least 18 probe per nexus
+        if self.can_afford(NEXUS) and not self.already_pending(NEXUS) and len(self.units(PROBE))* len(self.structures(NEXUS)) > 18*len(self.structures(NEXUS)):
+            await self.expand_now()
+
+        #redistribute idles.
+        for probes in self.units(PROBE).idle:
+            await self.distribute_workers()
+
+
 
 
 
