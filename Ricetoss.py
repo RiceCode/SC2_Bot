@@ -21,13 +21,6 @@ import time
 
 
 
-###########################
-
-
-#PROBLEM - DEFEND() NOT WORKING ALL OF A SUDDEN AFTER WE FINISH THE UPGRADE METHODS......
-
-################
-
 
 class Emptybot(sc2.BotAI):
     async def on_step(self, iteration):
